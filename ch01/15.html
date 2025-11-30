@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>DeviceMotion & Geolocation 滾球測試</title>
+<style>
+  body { 
+    margin: 0; 
+    padding: 0; 
+    overflow: hidden; /* 防止捲動 */
+    background-color: #222; 
+    font-family: sans-serif;
+    touch-action: none; /* 停用觸控縮放 */
+  }
+  
+  #info {
+    position: absolute;
+    top: 20px;
+    left: 20px;
+    color: white;
+    z-index: 10;
+    pointer-events: none; /* 讓點擊穿透文字 */
+    /* 調整背景讓文字更清晰 */
+    background: rgba(0, 0, 0, 0.5);
+    padding: 10px;
+    border-radius: 5px;
+  }
+  
+  #info p { margin: 5px 0; }
+  #info div { margin-top: 5px; font-family: monospace; }
+  
+  #geoOutput {
+      border-top: 1px solid rgba(255, 255, 255, 0.3);
+      padding-top: 5px;
+      font-size: 0.9em;
+      white-space: pre; /* 保留換行和空格 */
+  }
+
+  #startBtn {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    padding: 15px 30px;
+    font-size: 18px;
+    background: #007bff;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    z-index: 20;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+</style>
+</head>
+<body>
+
+<div id="info">
+  <h2>滾球測試</h2>
+  <p>請水平握持手機並傾斜</p>
+  <div id="motionOutput">等待 DeviceMotion 數據...</div>
+  <div id="geoOutput">等待定位數據...</div>
+</div>
+
+<button id="startBtn">點擊啟用感測器與定位</button>
+<canvas id="gameCanvas"></canvas>
+
+<script>
+// --- 變數設定 ---
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+const motionOutput = document.getElementById('motionOutput'); // 修改 ID 以區分
+const geoOutput = document.getElementById('geoOutput');       // 定位輸出 ID
+const startBtn = document.getElementById('startBtn');
+
+// 球的物理屬性
+let ball = {
+  x: 0,
+  y: 0,
+  radius: 20,
+  vx: 0, // X軸速度
+  vy: 0, // Y軸速度
+  color: '#ffdd00'
+};
+
+// 感測器數值
+let accX = 0;
+let accY = 0;
+let accZ = 0; // Z 軸加速度
+
+// 物理參數
+const FRICTION = 0.98; 
+const SENSITIVITY = 0.5; 
+
+// --- 初始化 Canvas ---
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  if (ball.x === 0 && ball.y === 0) {
+    ball.x = canvas.width / 2;
+    ball.y = canvas.height / 2;
+  }
+}
+window.addEventListener('resize', resize);
+resize();
+
+// --- 權限處理 (iOS DeviceMotion 必備) ---
+async function requestDeviceMotionPermission() {
+  if (typeof DeviceMotionEvent.requestPermission === 'function') {
+    try {
+      const state = await DeviceMotionEvent.requestPermission();
+      return state === 'granted';
+    } catch (e) {
+      alert("DeviceMotion 權限被拒絕");
+      return false;
+    }
+  }
+  return true; 
+}
+
+// --- 地理定位邏輯 ---
+function startGeolocation() {
+    if ("geolocation" in navigator) {
+        geoOutput.textContent = "請求定位中...";
+        
+        // 使用 watchPosition 持續監測位置
+        navigator.geolocation.watchPosition(
+            (position) => {
+                const coords = position.coords;
+                // 將經度、緯度、海拔等資訊格式化輸出
+                geoOutput.textContent = `
+定位：已啟動
+經度 (Lon): ${coords.longitude.toFixed(6)}
+緯度 (Lat): ${coords.latitude.toFixed(6)}
+海拔 (Alt): ${coords.altitude ? coords.altitude.toFixed(1) + ' 公尺' : 'N/A'}
+精度 (Acc): ${coords.accuracy.toFixed(1)} 公尺
+                `;
+            },
+            (error) => {
+                geoOutput.textContent = `定位錯誤: ${error.message} (${error.code})`;
+                console.error("Geolocation Error:", error);
+            },
+            {
+                enableHighAccuracy: true, // 啟用高精度定位
+                timeout: 5000,
+                maximumAge: 0
+            }
+        );
+    } else {
+        geoOutput.textContent = "您的瀏覽器不支援地理定位。";
+    }
+}
+
+
+// --- 啟動事件監聽器 ---
+startBtn.addEventListener('click', async () => {
+  // 1. 請求 DeviceMotion 權限
+  const allowedMotion = await requestDeviceMotionPermission();
+  
+  if (!allowedMotion) {
+    motionOutput.textContent = "感測器權限被拒絕。";
+    return;
+  }
+
+  startBtn.style.display = 'none'; // 隱藏按鈕
+  
+  // 2. 啟用 Geolocation
+  startGeolocation();
+
+  motionOutput.textContent = "等待 DeviceMotion 數據...";
+
+  // 3. 監聽 DeviceMotion
+  window.addEventListener('devicemotion', (event) => {
+    const acc = event.accelerationIncludingGravity;
+    
+    if (acc) {
+      accX = acc.x || 0;  
+      accY = acc.y || 0;  
+      accZ = acc.z || 0;  // 確保 Z 軸數據被獲取
+      
+      // 更新 DeviceMotion 資訊 (X, Y, Z 三軸)
+      motionOutput.textContent = `
+        加速度 (含重力):
+        X: ${accX.toFixed(3)} m/s²
+        Y: ${accY.toFixed(3)} m/s²
+        Z: ${accZ.toFixed(3)} m/s²
+      `;
+    }
+  });
+
+  // 4. 啟動動畫迴圈
+  animate();
+});
+
+// --- 動畫迴圈 (每秒約 60 次) ---
+function animate() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height); 
+
+  // 1. 根據感測器更新速度 (使用 X, Y)
+  ball.vx += accX * SENSITIVITY; 
+  ball.vy -= accY * SENSITIVITY; 
+
+  // 2. 套用摩擦力
+  ball.vx *= FRICTION;
+  ball.vy *= FRICTION;
+
+  // 3. 更新位置
+  ball.x += ball.vx;
+  ball.y += ball.vy;
+
+  // 4. 邊界檢查
+  const r = ball.radius;
+  if (ball.x - r < 0) { ball.x = r; ball.vx *= -0.7; }
+  if (ball.x + r > canvas.width) { ball.x = canvas.width - r; ball.vx *= -0.7; }
+  if (ball.y - r < 0) { ball.y = r; ball.vy *= -0.7; }
+  if (ball.y + r > canvas.height) { ball.y = canvas.height - r; ball.vy *= -0.7; }
+
+  // 5. 繪製球
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, r, 0, Math.PI * 2);
+  ctx.fillStyle = ball.color;
+  ctx.fill();
+  
+  ctx.beginPath();
+  ctx.arc(ball.x - 5, ball.y - 5, r / 3, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.fill();
+
+  requestAnimationFrame(animate);
+}
+</script>
+
+</body>
+</html>
