@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-<title>DeviceMotion 滾球視覺化</title>
+<title>DeviceMotion 滾球視覺化 (含Z軸數據)</title>
 <style>
   body { 
     margin: 0; 
@@ -71,6 +71,7 @@ let ball = {
 // 感測器數值
 let accX = 0;
 let accY = 0;
+let accZ = 0; // 新增 Z 軸變數
 
 // 物理參數
 const FRICTION = 0.98; // 摩擦力 (0.98 代表每幀速度衰減 2%)
@@ -115,19 +116,15 @@ startBtn.addEventListener('click', async () => {
     // 監聽感測器
     window.addEventListener('devicemotion', (event) => {
       // 取得含重力的加速度
-      // 注意：不同裝置方向定義可能略有不同，這裡針對手機直拿或平放優化
-      // Android/iOS 的座標系有時相反，這裡做一個通用的對應
       const acc = event.accelerationIncludingGravity;
       
       if (acc) {
-        // x 軸通常對應手機左右傾斜
-        // y 軸通常對應手機前後傾斜
-        // 我們將數值反向或調整以符合視覺直覺
         accX = acc.x || 0; 
         accY = acc.y || 0; 
+        accZ = acc.z || 0; // 取得 Z 軸數據
         
-        // 更新除錯文字
-        debug.textContent = `X: ${accX.toFixed(1)}, Y: ${accY.toFixed(1)}`;
+        // 更新除錯文字，現在包含 Z 軸
+        debug.textContent = `X: ${accX.toFixed(1)}, Y: ${accY.toFixed(1)}, Z: ${accZ.toFixed(1)}`;
       }
     });
 
@@ -141,10 +138,8 @@ function animate() {
   ctx.clearRect(0, 0, canvas.width, canvas.height); // 清空畫面
 
   // 1. 根據感測器更新速度
-  // 注意：這裡的 -accX 是因為手機向左傾斜 X 為負，但我們希望球往左(X減小)跑，或往右跑?
-  // 視手機拿法而定，如果不順手可以把加號改減號
   ball.vx += accX * SENSITIVITY; 
-  ball.vy -= accY * SENSITIVITY; // Y軸通常螢幕向下是正，感測器向上傾斜Y變負
+  ball.vy -= accY * SENSITIVITY; 
 
   // 2. 套用摩擦力 (讓球會慢慢停下來)
   ball.vx *= FRICTION;
