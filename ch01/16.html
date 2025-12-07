@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fetch Demo</title>
+    <style>
+        .value { 
+            font-weight: bold; 
+            color: #007bff; /* 藍色 */
+        }
+    </style>
+</head>
+<body>
+
+    <h1>Fetch Demo</h1>
+
+    <div class="json-output">
+        <h3>JSON 資料格式</h3>
+        <pre id="jsonOutput">
+            </pre>
+    </div>
+
+    <script>
+        async function f_test() {
+            // 圖片中顯示的 GitHub API URL
+            let url = 'https://api.github.com/repos/javascript-tutorial/en.javascript.info/commits'; 
+
+            try {
+                // 執行網路請求
+                let response = await fetch(url);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+                }
+
+                // 讀取並解析 JSON 資料 (雖然不顯示，但程式碼還是會執行這一步)
+                let commits = await response.json(); 
+
+                // 獲取顯示區域的元素
+                const jsonOutput = document.getElementById('jsonOutput');
+                
+                // *** 根據您的要求：註解掉輸出 JSON 的程式碼 ***
+                // jsonOutput.textContent = JSON.stringify(commits, null, 2); 
+                
+                // 為了讓頁面看起來乾淨，我們可以顯示一個載入完成的提示
+                jsonOutput.textContent = 
+
+            } catch (error) {
+                // 如果請求失敗或解析出錯，顯示錯誤訊息
+                document.getElementById('jsonOutput').textContent = `載入資料失敗: ${error.message}`;
+            }
+        }
+
+        // 啟動函數
+        f_test();
+    </script>
+
+</body>
+</html>
