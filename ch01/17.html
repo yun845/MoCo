@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fetch</title>
+    <style>
+        .sensor-data { margin: 20px; padding: 15px; border: 1px solid #ccc; }
+        .axis { margin: 10px 0; }
+        .value { font-weight: bold; color: #007bff; }
+    </style>
+</head>
+<body>
+
+    <h1>Fetch Demo-POST</h1>
+    <div class="json-output">
+        <h3>JSON 資料格式</h3>
+        <form id="formElem">
+            <input type="text" name="firstName" value="John">
+            <input type="text" name="picture" value="picture" accept="image/*">
+            <input type="submit">
+        </form>
+        <pre id="jsonOutput"></pre>
+    </div>
+
+    <script>
+        const formElem = document.getElementById("formElem");
+        
+        // 監聽表單的 submit 事件
+        formElem.onsubmit = async (e) => {
+            e.preventDefault(); // 阻止表單的預設提交行為
+            
+            // 1. 建立 FormData 物件，包含表單中的所有欄位資料
+            const formData = new FormData(formElem);
+
+            try {
+                // 2. 使用 fetch 發送 POST 請求
+                let response = await fetch("https://httpcan.org/post", {
+                    method: 'POST', // 指定請求方法為 POST
+                    body: formData   // 將 FormData 物件作為請求主體
+                });
+                
+                // 3. 檢查響應狀態碼
+                if (!response.ok) {
+                    throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+                }
+
+                // 4. 解析 JSON 響應
+                let result = await response.json();
+                
+                // 5. 輸出結果 (這裡使用 alert，但更好的做法是輸出到 pre 標籤)
+                // alert(result.message || JSON.stringify(result, null, 2));
+
+                // 將完整的 JSON 響應輸出到 <pre> 標籤
+                document.getElementById('jsonOutput').textContent = JSON.stringify(result, null, 2);
+
+            } catch (error) {
+                console.error("Fetch 請求失敗:", error);
+                alert(`請求發生錯誤: ${error.message}`);
+            }
+        };
+    </script>
+</body>
+</html>
