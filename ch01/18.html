@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Fetch - GET</title>
+    <style>
+        .sensor-data { margin: 20px; padding: 15px; border: 1px solid #ccc; }
+        .axis { margin: 10px 0; }
+        .value { font-weight: bold; color: #007bff; }
+    </style>
+</head>
+<body>
+
+    <h1>Fetch Demo - GET</h1>
+    <div class="json-output">
+        <h3>JSON 資料格式</h3>
+        <form id="formElemGet"> <input type="text" name="firstName" value="John">
+            <input type="text" name="picture" value="picture">
+            <input type="submit">
+        </form>
+        <pre id="jsonOutputGet"></pre> </div>
+
+    <script>
+        const formElemGet = document.getElementById("formElemGet");
+        const BASE_URL = "https://httpcan.org/get"; // GET 請求通常使用 /get
+
+        formElemGet.onsubmit = async (e) => {
+            e.preventDefault();
+            
+            // 1. 建立 FormData 物件
+            const formData = new FormData(formElemGet);
+            
+            // 2. 將 FormData 轉換為 URL 查詢字串參數 (e.g., ?firstName=John&picture=picture)
+            const params = new URLSearchParams(formData);
+
+            // 3. 建立帶有查詢字串的完整 URL
+            const urlWithParams = `${BASE_URL}?${params.toString()}`;
+
+            try {
+                // 4. 使用 fetch 發送 GET 請求
+                let response = await fetch(urlWithParams, {
+                    method: 'GET' // 指定請求方法為 GET
+                    // GET 請求通常不包含 body
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP 錯誤! 狀態碼: ${response.status}`);
+                }
+
+                // 5. 解析 JSON 響應
+                let result = await response.json();
+                
+                // 6. 將完整的 JSON 響應輸出
+                document.getElementById('jsonOutputGet').textContent = JSON.stringify(result, null, 2);
+
+            } catch (error) {
+                console.error("Fetch 請求失敗:", error);
+                alert(`請求發生錯誤: ${error.message}`);
+            }
+        };
+    </script>
+</body>
+</html>
