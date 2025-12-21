@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>行動救援通訊器</title>
+    <style>
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
+        .sos-btn { 
+            width: 100%; max-width: 300px; height: 150px; 
+            font-size: 24px; font-weight: bold; color: white;
+            background: #e74c3c; border: none; border-radius: 20px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2); cursor: pointer;
+        }
+        .sos-btn:active { background: #c0392b; transform: scale(0.98); }
+        #log { margin-top: 30px; text-align: left; background: white; padding: 10px; border-radius: 10px; }
+        .msg-item { border-bottom: 1px solid #ddd; padding: 10px 0; }
+        .map-link { color: #3498db; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <h2>行動位置救援系統</h2>
+    <p>遇到緊急狀況時，請按下大紅按鈕</p>
+    
+    <button class="sos-btn" id="sendBtn">發送救援訊號<br>(包含 GPS 座標)</button>
+
+    <div id="log">
+        <strong>即時通訊看板：</strong>
+        <div id="messageList"></div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script>
+        const socket = io();
+        const sendBtn = document.getElementById('sendBtn');
+        const messageList = document.getElementById('messageList');
+
+        sendBtn.onclick = () => {
+            if (navigator.geolocation) {
+                // 顯示獲取中，增加互動感
+                sendBtn.innerText = "定位中...";
+                
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    const payload = {
+                        lat: pos.coords.latitude,
+                        lng: pos.coords.longitude,
+                        id: socket.id.substring(0, 5) // 顯示部分 ID 代表不同使用者
+                    };
+                    socket.emit('sos', payload);
+                    sendBtn.innerHTML = "發送救援訊號<br>(包含 GPS 座標)";
+                    alert("訊號已發出！");
+                }, (err) => {
+                    alert("無法取得位置，請開啟 GPS");
+                    sendBtn.innerHTML = "發送救援訊號<br>(包含 GPS 座標)";
+                });
+            }
+        };
+
+        socket.on('receive_sos', (data) => {
+            const div = document.createElement('div');
+            div.className = 'msg-item';
+            // 創新點：自動生成 Google 地圖連結
+            const mapUrl = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
+            div.innerHTML = `
+                <b>[求救]</b> 使用者 ${data.id} <br>
+                時間: ${data.serverTime} <br>
+                座標: ${data.lat.toFixed(4)}, ${data.lng.toFixed(4)} <br>
+                <a href="${mapUrl}" target="_blank" class="map-link">📍 在地圖上查看位置</a>
+            `;
+            messageList.prepend(div); // 新訊息放在最上面
+        });
+    </script>
+</body>
+</html>
