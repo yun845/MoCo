@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>getUserMedia 優化範例</title>
+    <style>
+        /* 增加一點簡單的樣式 */
+        #video {
+            width: 100%;
+            max-width: 640px;
+            background-color: #000;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+        .container {
+            padding: 20px;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <button id="btnAction">啟動相機與麥克風</button>
+    <br>
+    <video id="video" autoplay playsinline muted></video>
+</div>
+
+<script>
+    const btnAction = document.getElementById('btnAction');
+    const videoElement = document.getElementById('video');
+    let localStream = null;
+
+    // 封裝啟動函數
+    async function startMedia() {
+        // 1. 檢查瀏覽器是否支援
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+            alert('您的瀏覽器不支援訪問媒體設備');
+            return;
+        }
+
+        const constraints = {
+            video: { 
+                facingMode: "user", // 優先使用前鏡頭
+                width: { ideal: 1280 },
+                height: { ideal: 720 }
+            },
+            audio: true
+        };
+
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            localStream = stream;
+            videoElement.srcObject = stream;
+            
+            // UI 優化
+            btnAction.textContent = '關閉相機';
+            btnAction.style.backgroundColor = '#ff4d4d';
+        } catch (err) {
+            console.error('存取媒體設備失敗:', err);
+            handleError(err);
+        }
+    }
+
+    // 封裝停止函數
+    function stopMedia() {
+        if (localStream) {
+            localStream.getTracks().forEach(track => track.stop());
+            videoElement.srcObject = null;
+            localStream = null;
+            
+            btnAction.textContent = '啟動相機與麥克風';
+            btnAction.style.backgroundColor = '';
+        }
+    }
+
+    // 錯誤處理邏輯
+    function handleError(error) {
+        let message = '無法取得權限';
+        if (error.name === 'NotAllowedError') {
+            message = '使用者拒絕了相機/麥克風存取權限';
+        } else if (error.name === 'NotFoundError') {
+            message = '找不到相機或麥克風設備';
+        }
+        alert(message);
+    }
+
+    // 使用 addEventListener
+    btnAction.addEventListener('click', () => {
+        if (localStream && localStream.active) {
+            stopMedia();
+        } else {
+            startMedia();
+        }
+    });
+</script>
+
+</body>
+</html>
