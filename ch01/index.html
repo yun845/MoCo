@@ -3,73 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>行動救援通訊器</title>
+    <title>行動救援通訊器-雲端版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js" type="text/javascript"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; padding: 20px; background: #f4f4f4; }
+        body { font-family: sans-serif; text-align: center; padding: 20px; background: #eef2f3; }
         .sos-btn { 
-            width: 100%; max-width: 300px; height: 150px; 
-            font-size: 24px; font-weight: bold; color: white;
-            background: #e74c3c; border: none; border-radius: 20px;
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2); cursor: pointer;
+            width: 100%; max-width: 280px; height: 120px; 
+            font-size: 22px; font-weight: bold; color: white;
+            background: #d35400; border: none; border-radius: 60px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.1); cursor: pointer;
+            transition: 0.3s;
         }
-        .sos-btn:active { background: #c0392b; transform: scale(0.98); }
-        #log { margin-top: 30px; text-align: left; background: white; padding: 10px; border-radius: 10px; }
-        .msg-item { border-bottom: 1px solid #ddd; padding: 10px 0; }
-        .map-link { color: #3498db; text-decoration: none; font-weight: bold; }
+        .sos-btn:active { transform: scale(0.95); background: #a04000; }
+        #status { color: #7f8c8d; font-size: 14px; margin-bottom: 10px; }
+        #log { margin-top: 20px; text-align: left; background: white; padding: 15px; border-radius: 15px; box-shadow: 0 2px 10px rgba(0,0,0,0.05); }
+        .msg-item { border-left: 5px solid #d35400; padding: 10px; margin-bottom: 10px; background: #fff9f5; border-radius: 5px; }
+        .map-link { display: inline-block; margin-top: 5px; color: #2980b9; font-weight: bold; }
     </style>
 </head>
 <body>
 
-    <h2>行動位置救援系統</h2>
-    <p>遇到緊急狀況時，請按下大紅按鈕</p>
+    <h2>🚨 行動救援廣播系統</h2>
+    <div id="status">通訊連線中...</div>
     
-    <button class="sos-btn" id="sendBtn">發送救援訊號<br>(包含 GPS 座標)</button>
+    <button class="sos-btn" id="sendBtn">發送我的座標</button>
 
     <div id="log">
-        <strong>即時通訊看板：</strong>
+        <strong>最新救援請求：</strong>
         <div id="messageList"></div>
     </div>
 
-    <script src="/socket.io/socket.io.js"></script>
     <script>
-        const socket = io();
-        const sendBtn = document.getElementById('sendBtn');
-        const messageList = document.getElementById('messageList');
+        // --- 通訊設定 ---
+        const TOPIC = "moco/project/sos/yourname"; // 建議改為你的名字，避免跟別人重複
+        const client = new Paho.MQTT.Client("broker.emqx.io", Number(8083), "client_" + Math.random());
 
-        sendBtn.onclick = () => {
+        // 當連線成功時
+        client.onConnected = () => {
+            document.getElementById('status').innerText = "✅ 系統已連線 (雲端通訊中)";
+            client.subscribe(TOPIC); // 訂閱頻道，準備接收訊息
+        };
+
+        // 當收到訊息時
+        client.onMessageArrived = (message) => {
+            const data = JSON.parse(message.payloadString);
+            const div = document.createElement('div');
+            div.className = 'msg-item';
+            const mapUrl = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
+            div.innerHTML = `
+                <b>[求救訊號]</b> <br>
+                時間: ${new Date().toLocaleTimeString()} <br>
+                座標: ${data.lat.toFixed(4)}, ${data.lng.toFixed(4)} <br>
+                <a href="${mapUrl}" target="_blank" class="map-link">📍 點我開啟 Google 地圖導航</a>
+            `;
+            document.getElementById('messageList').prepend(div);
+        };
+
+        client.connect({ onSuccess: () => { client.onConnected(); }, useSSL: true });
+
+        // --- 行動功能：抓取 GPS ---
+        document.getElementById('sendBtn').onclick = () => {
             if (navigator.geolocation) {
-                // 顯示獲取中，增加互動感
-                sendBtn.innerText = "定位中...";
-                
+                document.getElementById('sendBtn').innerText = "定位中...";
                 navigator.geolocation.getCurrentPosition((pos) => {
                     const payload = {
                         lat: pos.coords.latitude,
-                        lng: pos.coords.longitude,
-                        id: socket.id.substring(0, 5) // 顯示部分 ID 代表不同使用者
+                        lng: pos.coords.longitude
                     };
-                    socket.emit('sos', payload);
-                    sendBtn.innerHTML = "發送救援訊號<br>(包含 GPS 座標)";
-                    alert("訊號已發出！");
+                    // 送出訊息
+                    const message = new Paho.MQTT.Message(JSON.stringify(payload));
+                    message.destinationName = TOPIC;
+                    client.send(message);
+                    
+                    document.getElementById('sendBtn').innerText = "發送我的座標";
+                    alert("救援訊號已廣播！");
                 }, (err) => {
-                    alert("無法取得位置，請開啟 GPS");
-                    sendBtn.innerHTML = "發送救援訊號<br>(包含 GPS 座標)";
+                    alert("請開啟手機 GPS 權限");
+                    document.getElementById('sendBtn').innerText = "發送我的座標";
                 });
             }
         };
-
-        socket.on('receive_sos', (data) => {
-            const div = document.createElement('div');
-            div.className = 'msg-item';
-            // 創新點：自動生成 Google 地圖連結
-            const mapUrl = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
-            div.innerHTML = `
-                <b>[求救]</b> 使用者 ${data.id} <br>
-                時間: ${data.serverTime} <br>
-                座標: ${data.lat.toFixed(4)}, ${data.lng.toFixed(4)} <br>
-                <a href="${mapUrl}" target="_blank" class="map-link">📍 在地圖上查看位置</a>
-            `;
-            messageList.prepend(div); // 新訊息放在最上面
-        });
     </script>
 </body>
 </html>
