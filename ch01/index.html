@@ -3,98 +3,157 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>行動救援系統-穩定版</title>
+    <title>行動救援共享系統-多人連線版</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <style>
-        body { font-family: sans-serif; text-align: center; background: #f4f4f4; padding: 20px; }
+        body { font-family: -apple-system, "Microsoft JhengHei", sans-serif; text-align: center; background: #eef2f7; padding: 20px; color: #333; }
+        .container { max-width: 450px; margin: 0 auto; }
+        
+        /* 救援按鈕：加大且有呼吸燈效果 */
         .sos-btn { 
-            width: 200px; height: 200px; border-radius: 50%; background: #e74c3c;
+            width: 200px; height: 200px; border-radius: 50%; background: #d63031;
             color: white; border: none; font-size: 24px; font-weight: bold;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.2); cursor: pointer;
+            box-shadow: 0 10px 25px rgba(214, 48, 49, 0.4); cursor: pointer;
+            transition: 0.3s; margin: 20px 0;
         }
-        #debug-info { color: #e67e22; font-size: 13px; margin: 10px; font-weight: bold; }
-        #log { text-align: left; background: white; padding: 15px; border-radius: 10px; margin-top: 20px; }
-        .msg-item { border-bottom: 1px solid #eee; padding: 10px 0; }
+        .sos-btn:active { transform: scale(0.92); }
+        
+        #debug-info { color: #d35400; font-weight: bold; font-size: 14px; min-height: 24px; margin-bottom: 10px; }
+        
+        /* 訊息看板 */
+        #log { text-align: left; background: white; padding: 20px; border-radius: 15px; box-shadow: 0 4px 15px rgba(0,0,0,0.08); }
+        .msg-item { border-left: 6px solid #0984e3; padding: 12px; margin-bottom: 15px; background: #f1f9ff; border-radius: 8px; animation: fadeIn 0.5s; }
+        .my-post { border-left-color: #00b894; background: #f0fff4; }
+        
+        .map-link { 
+            display: inline-block; margin-top: 10px; background: #0984e3; color: white;
+            padding: 8px 15px; border-radius: 5px; text-decoration: none; font-size: 14px; font-weight: bold;
+        }
+        
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
     </style>
 </head>
 <body>
 
-    <h2>🚨 行動救援廣播系統</h2>
-    <div id="status">MQTT 連線中...</div>
-    <div id="debug-info">準備就緒</div>
+<div class="container">
+    <h2>📡 雲端即時救援頻道</h2>
+    <div id="status">⏳ 正在加入救援網路...</div>
     
-    <button class="sos-btn" id="sendBtn">發送座標</button>
+    <center>
+        <button class="sos-btn" id="sendBtn">發送座標<br>求救</button>
+    </center>
+
+    <div id="debug-info"></div>
 
     <div id="log">
-        <strong>救援訊息清單：</strong>
-        <div id="messageList"></div>
+        <strong>🚩 即時救援看板 (全頻道)：</strong>
+        <hr>
+        <div id="messageList">
+            <p style="color:#999; text-align:center;">目前尚無救援請求...</p>
+        </div>
     </div>
+</div>
 
-    <script>
-        // --- 1. 通訊設定 ---
-        const TOPIC = "moco/sos/final/test12345"; // 頻道名稱
-        const client = new Paho.MQTT.Client("broker.emqx.io", Number(8083), "cl_" + Math.random());
+<script>
+    // --- 1. MQTT 多人通訊設定 ---
+    // 我們使用同一個 TOPIC，這樣所有點開網頁的人都能互相看到訊息
+    const SHARED_TOPIC = "moco/final/shared_rescue_board"; 
+    const client = new Paho.MQTT.Client("broker.emqx.io", Number(8083), "user_" + Math.random().toString(16).substr(2, 5));
 
-        client.onConnected = () => {
-            document.getElementById('status').innerText = "✅ 伺服器已連線";
-            client.subscribe(TOPIC);
-        };
+    client.onConnected = () => {
+        document.getElementById('status').innerText = "✅ 已進入共享頻道：多人連線中";
+        client.subscribe(SHARED_TOPIC);
+    };
 
-        client.onMessageArrived = (message) => {
+    // 當雲端傳來「任何人」的座標時
+    client.onMessageArrived = (message) => {
+        try {
             const data = JSON.parse(message.payloadString);
-            const div = document.createElement('div');
-            div.className = 'msg-item';
-            const mapUrl = `https://www.google.com/maps?q=${data.lat},${data.lng}`;
-            div.innerHTML = `<b>[求救]</b> ${new Date().toLocaleTimeString()}<br>座標: ${data.lat.toFixed(4)},${data.lng.toFixed(4)} <br><a href="${mapUrl}" target="_blank">📍在地圖查看</a>`;
-            document.getElementById('messageList').prepend(div);
-        };
-
-        client.connect({ onSuccess: () => { client.onConnected(); }, useSSL: true });
-
-        // --- 2. 定位功能 (核心修改) ---
-        const sendBtn = document.getElementById('sendBtn');
-        const debug = document.getElementById('debug-info');
-
-        sendBtn.onclick = () => {
-            debug.innerText = "🔍 正在啟動 GPS...";
-            sendBtn.innerText = "定位中...";
+            // 移除「尚無訊息」的提示
+            if (document.querySelector('#messageList p')) document.querySelector('#messageList p').remove();
             
-            // 定位成功要做的事
-            const onUpdate = (pos) => {
-                debug.innerText = "✅ 定位成功！正在傳送...";
-                const payload = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-                const message = new Paho.MQTT.Message(JSON.stringify(payload));
-                message.destinationName = TOPIC;
-                client.send(message);
-                sendBtn.innerText = "發送座標";
-                alert("傳送成功！");
-            };
+            addToList(data.lat, data.lng, data.senderId);
+        } catch(e) { console.log("收到無效訊息"); }
+    };
 
-            // 定位失敗要做的事
-            const onError = (err) => {
-                if (err.code === 1) {
-                    debug.innerText = "❌ 錯誤：你拒絕了定位權限";
-                    alert("請在手機設定中允許瀏覽器存取位置");
-                } else if (err.code === 3) {
-                    debug.innerText = "⚠️ GPS 超時，切換至基地台定位...";
-                    // 超時後，自動嘗試「低精確度模式」
-                    navigator.geolocation.getCurrentPosition(onUpdate, (e) => {
-                        debug.innerText = "❌ 徹底失敗：抓不到位置";
-                        alert("請到窗邊或戶外再試一次");
-                        sendBtn.innerText = "發送座標";
-                    }, { enableHighAccuracy: false, timeout: 5000 });
-                } else {
-                    debug.innerText = "❌ 發生錯誤：" + err.message;
-                }
-            };
+    // 斷線重連機制
+    client.onConnectionLost = (responseObject) => {
+        document.getElementById('status').innerText = "❌ 連線中斷，正在重連...";
+        setTimeout(() => client.connect({ onSuccess: client.onConnected, useSSL: true }), 3000);
+    };
 
-            // 第一次嘗試：高精確度 (GPS)
-            navigator.geolocation.getCurrentPosition(onUpdate, onError, {
-                enableHighAccuracy: true,
-                timeout: 5000, // 只等 5 秒，不等了
-                maximumAge: 0
-            });
+    client.connect({ onSuccess: client.onConnected, useSSL: true });
+
+    // --- 2. 顯示清單功能 ---
+    function addToList(lat, lng, senderId) {
+        const list = document.getElementById('messageList');
+        const div = document.createElement('div');
+        
+        // 判斷是不是自己發的 (透過隨機 ID)
+        const isMe = client.clientId === senderId;
+        div.className = isMe ? "msg-item my-post" : "msg-item";
+        
+        const mapUrl = `https://www.google.com/maps?q=${lat},${lng}`;
+        
+        div.innerHTML = `
+            <b>${isMe ? "📍 我的發送紀錄" : "🚨 收到求救訊號"}</b><br>
+            <small>時間：${new Date().toLocaleTimeString()}</small><br>
+            座標：${lat.toFixed(5)}, ${lng.toFixed(5)}<br>
+            <a href="${mapUrl}" target="_blank" class="map-link">在地圖查看並導航</a>
+        `;
+        list.prepend(div);
+    }
+
+    // --- 3. 定位與廣播功能 ---
+    const sendBtn = document.getElementById('sendBtn');
+    const debug = document.getElementById('debug-info');
+
+    sendBtn.onclick = () => {
+        if (!navigator.geolocation) return alert("您的手機不支援定位");
+
+        sendBtn.innerText = "正在定位...";
+        debug.innerText = "📡 搜尋 GPS 衛星中 (請至窗邊)...";
+
+        const options = { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 };
+
+        const success = (pos) => {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            
+            debug.innerText = "✅ 座標獲取成功，正在廣播...";
+
+            // 將座標發送給所有在頻道上的人
+            const payload = {
+                lat: lat,
+                lng: lng,
+                senderId: client.clientId // 標記是誰發的
+            };
+            
+            const message = new Paho.MQTT.Message(JSON.stringify(payload));
+            message.destinationName = SHARED_TOPIC;
+            client.send(message);
+
+            sendBtn.innerText = "發送座標\n求救";
+            debug.innerText = "🚀 訊息已同步至所有設備！";
         };
-    </script>
+
+        const error = (err) => {
+            // 如果 GPS 太慢，自動降級到網路定位
+            if (err.code === 3) {
+                debug.innerText = "⚠️ GPS 訊號弱，切換基地台模式...";
+                navigator.geolocation.getCurrentPosition(success, (e) => {
+                    alert("定位失敗：請確認手機 GPS 已開啟且非室內深處。");
+                    sendBtn.innerText = "發送座標\n求救";
+                    debug.innerText = "";
+                }, { enableHighAccuracy: false, timeout: 5000 });
+            } else {
+                alert("錯誤：" + err.message);
+                sendBtn.innerText = "發送座標\n求救";
+            }
+        };
+
+        navigator.geolocation.getCurrentPosition(success, error, options);
+    };
+</script>
 </body>
 </html>
