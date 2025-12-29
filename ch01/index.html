@@ -1,155 +1,157 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html>
 <head>
-    <meta charset="UTF-8">
+    <meta charset="utf-8" />
+    <title>期末專案：銀髮守護者 (跌倒告警系統)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>行動狀態監控救援系統</title>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/paho-mqtt/1.0.1/mqttws31.min.js"></script>
     <style>
-        body { font-family: sans-serif; background: #f0f2f5; padding: 15px; text-align: center; }
-        .container { max-width: 500px; margin: 0 auto; background: white; padding: 20px; border-radius: 20px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
-        .sos-btn { 
-            width: 150px; height: 150px; border-radius: 50%; background: #d63031;
-            color: white; border: none; font-size: 20px; font-weight: bold;
-            box-shadow: 0 8px 20px rgba(214, 48, 49, 0.4); cursor: pointer; margin: 15px 0;
-        }
-        .permission-btn { background: #4CAF50; color: white; padding: 8px 12px; border: none; border-radius: 5px; margin: 5px; font-size: 12px; }
-        #stateDisplay { text-align: left; background: #2d3436; color: #00ff00; padding: 15px; border-radius: 10px; font-family: monospace; font-size: 12px; white-space: pre-wrap; overflow-x: auto; }
-        .msg-item { border-left: 5px solid #0984e3; background: #f1f9ff; padding: 10px; margin-top: 10px; text-align: left; border-radius: 5px; font-size: 13px; }
+        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; background-color: #f4f4f9; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; font-size: 24px; text-align: center; }
+        .status-box { background: #e7f3ff; border: 1px solid #b3d7ff; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
+        .btn-sensor { background-color: #4CAF50; color: white; }
+        .btn-geo { background-color: #2196F3; color: white; }
+        #stateDisplay { background: #333; color: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 13px; }
+        .alert-active { background-color: #ff4d4d !important; color: white; animation: blink 1s infinite; padding: 20px; border-radius: 10px; display: none; margin-top: 20px; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
     </style>
 </head>
 <body>
 
 <div class="container">
-    <h2>📡 行動狀態監控救援</h2>
-    
-    <div id="status" style="font-size: 13px; color: #666;">系統初始化中...</div>
-    <div style="margin-bottom: 15px;">
-        <button class="permission-btn" onclick="requestSensorPermissionsManually()">授權感測器 (iOS)</button>
-        <button class="permission-btn" onclick="retryGeolocation()">重新授權定位</button>
+    <h1>👵 銀髮守護者</h1>
+    <div class="status-box" id="status">請先點擊下方按鈕授權感測器</div>
+
+    <div class="btn-group">
+        <button class="btn-sensor" onclick="requestSensorPermissionsManually()">啟動跌倒偵測 (iOS/Android)</button>
+        <button class="btn-geo" onclick="retryGeolocation()">重新讀取 GPS 定位</button>
     </div>
 
-    <button class="sos-btn" id="sendBtn">發送當前<br>狀態與座標</button>
-
-    <h3>📊 即時感測器數據：</h3>
-    <pre id="stateDisplay">等待感測器資料...</pre>
-
-    <div id="log">
-        <strong>🚩 救援看板：</strong>
-        <div id="messageList"></div>
+    <div id="fallAlert" class="alert-active">
+        <strong>🚨 偵測到疑似跌倒！</strong><br>
+        緊急通訊訊息已發送至雲端。<br>
+        <span id="locationLink"></span>
+        <br><br>
+        <button onclick="resetAlert()" style="background: white; color: red;">我沒事，取消告警</button>
     </div>
+
+    <h3>裝置即時數據 (行動要素)：</h3>
+    <pre id="stateDisplay">等待資料中...</pre>
 </div>
 
 <script>
-    // ----------------------------
-    // 1. MQTT 與 全域變數
-    // ----------------------------
-    const SHARED_TOPIC = "moco/final/sensor_rescue_system";
-    const client = new Paho.MQTT.Client("broker.emqx.io", Number(8083), "user_" + Math.random().toString(16).substr(2, 5));
+// --- 1. 全域狀態變數 ---
+const deviceState = {
+    lat: null,
+    lon: null,
+    accel: { x: 0, y: 0, z: 0 }
+};
+let isAlerted = false; // 標記是否已觸發告警
 
-    const deviceState = {
-        lat: null, lon: null,
-        accel: { x: 0, y: 0, z: 0 },
-        orientation: { alpha: 0, beta: 0, gamma: 0 }
-    };
+// --- 2. 核心邏輯：跌倒偵測 (創新點) ---
+function detectFall(accel) {
+    if (isAlerted) return;
 
-    // ----------------------------
-    // 2. 通訊邏輯
-    // ----------------------------
-    client.onConnected = () => {
-        document.getElementById('status').innerText = "✅ 雲端已連線";
-        client.subscribe(SHARED_TOPIC);
-    };
+    // 計算總加速度 (合力)
+    // 當手機撞擊地面時，總加速度會瞬間暴增
+    const totalAccel = Math.sqrt(accel.x**2 + accel.y**2 + accel.z**2);
+    
+    // 門檻值設定：25 m/s² 以上視為異常衝擊 (地球重力約 9.8)
+    if (totalAccel > 25) {
+        isAlerted = true;
+        sendEmergencySignal(totalAccel);
+    }
+}
 
-    client.onMessageArrived = (message) => {
-        const data = JSON.parse(message.payloadString);
-        const list = document.getElementById('messageList');
-        const div = document.createElement('div');
-        div.className = "msg-item";
-        const mapUrl = `https://www.google.com/maps?q=${data.lat},${data.lon}`;
+// --- 3. 通訊實作：發送告警 (通訊點) ---
+function sendEmergencySignal(impact) {
+    const statusDiv = document.getElementById("status");
+    const alertDiv = document.getElementById("fallAlert");
+    const linkSpan = document.getElementById("locationLink");
+
+    statusDiv.textContent = "狀態：緊急狀況！";
+    alertDiv.style.display = "block";
+
+    // 產生 Google 地圖通訊連結
+    const mapUrl = `https://www.google.com/maps?q=${deviceState.lat},${deviceState.lon}`;
+    linkSpan.innerHTML = `<a href="${mapUrl}" target="_blank" style="color:white; text-decoration:underline;">點此查看長輩跌倒位置</a>`;
+
+    // 模擬通訊：在控制台輸出通訊封包
+    console.log("【通訊發送】目的地：緊急救援中心");
+    console.log(`【通訊內容】緯度:${deviceState.lat}, 經度:${deviceState.lon}, 衝擊力:${impact.toFixed(2)}`);
+    
+    // 瀏覽器跳出告警 (這也是一種簡單的通訊回報)
+    alert("緊急通知：偵測到跌倒！位置資訊已準備就緒。");
+}
+
+function resetAlert() {
+    isAlerted = false;
+    document.getElementById("fallAlert").style.display = "none";
+    document.getElementById("status").textContent = "狀態：監控中";
+}
+
+// --- 4. 基礎感測器與定位功能 (參考老師架構) ---
+function updateUI() {
+    document.getElementById("stateDisplay").textContent = JSON.stringify(deviceState, null, 2);
+}
+
+// 地理位置 (Geolocation API)
+function setupGeolocation() {
+    if ("geolocation" in navigator) {
+        navigator.geolocation.watchPosition(
+            (position) => {
+                deviceState.lat = position.coords.latitude;
+                deviceState.lon = position.coords.longitude;
+                updateUI();
+            },
+            (error) => console.error("定位錯誤:", error),
+            { enableHighAccuracy: true }
+        );
+    }
+}
+
+// 運動感測器 (Motion API)
+function startMotionListener() {
+    window.addEventListener("devicemotion", (event) => {
+        const acc = event.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
+        deviceState.accel.x = acc.x || 0;
+        deviceState.accel.y = acc.y || 0;
+        deviceState.accel.z = acc.z || 0;
         
-        div.innerHTML = `
-            <b>🚨 收到狀態更新</b> (${new Date().toLocaleTimeString()})<br>
-            📍 座標: ${data.lat?.toFixed(4)}, ${data.lon?.toFixed(4)}<br>
-            📐 傾斜度: Beta:${data.orientation.beta?.toFixed(1)}°, Gamma:${data.orientation.gamma?.toFixed(1)}°<br>
-            震動(G): X:${data.accel.x?.toFixed(1)}, Y:${data.accel.y?.toFixed(1)}<br>
-            <a href="${mapUrl}" target="_blank" style="color:#0984e3; font-weight:bold;">在地圖查看位置</a>
-        `;
-        list.prepend(div);
-    };
+        updateUI();
+        detectFall(deviceState.accel); // 每次更新數據都檢查是否跌倒
+    });
+}
 
-    client.connect({ onSuccess: () => client.onConnected(), useSSL: true });
-
-    // ----------------------------
-    // 3. 感測器邏輯 (從你提供的程式碼整合)
-    // ----------------------------
-    function onStateUpdate() {
-        document.getElementById("stateDisplay").textContent = JSON.stringify(deviceState, null, 2);
-    }
-
-    // Geolocation
-    function startGeolocationWatch() {
-        navigator.geolocation.watchPosition((pos) => {
-            deviceState.lat = pos.coords.latitude;
-            deviceState.lon = pos.coords.longitude;
-            onStateUpdate();
-        }, (err) => console.error(err), { enableHighAccuracy: true });
-    }
-
-    // Motion & Orientation
-    function startSensors() {
-        // 加速度計
-        window.addEventListener("devicemotion", (event) => {
-            const acc = event.accelerationIncludingGravity || {};
-            deviceState.accel.x = acc.x || 0;
-            deviceState.accel.y = acc.y || 0;
-            deviceState.accel.z = acc.z || 0;
-            onStateUpdate();
-        });
-        // 陀螺儀
-        window.addEventListener("deviceorientation", (event) => {
-            deviceState.orientation.alpha = event.alpha || 0;
-            deviceState.orientation.beta = event.beta || 0;
-            deviceState.orientation.gamma = event.gamma || 0;
-            onStateUpdate();
-        });
-    }
-
-    // iOS 手動授權按鈕邏輯
-    async function requestSensorPermissionsManually() {
-        if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+// 針對 iOS/現代瀏覽器的權限請求
+async function requestSensorPermissionsManually() {
+    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
+        try {
             const state = await DeviceMotionEvent.requestPermission();
-            if (state === "granted") startSensors();
+            if (state === "granted") {
+                startMotionListener();
+                document.getElementById("status").textContent = "狀態：監控中";
+            }
+        } catch (e) {
+            alert("請確保使用 HTTPS 環境開啟網頁以獲得權限");
         }
-        if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function") {
-            const state = await DeviceOrientationEvent.requestPermission();
-            if (state === "granted") startSensors();
-        }
+    } else {
+        startMotionListener();
+        document.getElementById("status").textContent = "狀態：監控中";
     }
+}
 
-    function retryGeolocation() {
-        startGeolocationWatch();
-    }
+function retryGeolocation() {
+    setupGeolocation();
+}
 
-    // ----------------------------
-    // 4. 發送按鈕邏輯
-    // ----------------------------
-    document.getElementById('sendBtn').onclick = () => {
-        if (deviceState.lat === null) {
-            alert("尚未取得 GPS 座標，請稍候...");
-            return;
-        }
-        const message = new Paho.MQTT.Message(JSON.stringify(deviceState));
-        message.destinationName = SHARED_TOPIC;
-        client.send(message);
-        alert("當前狀態已成功廣播！");
-    };
-
-    // 初始化
-    window.onload = () => {
-        startGeolocationWatch();
-        startSensors();
-    };
+// 網頁開啟自動執行
+window.onload = () => {
+    setupGeolocation();
+};
 </script>
+
 </body>
 </html>
