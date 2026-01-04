@@ -2,156 +2,159 @@
 <html>
 <head>
     <meta charset="utf-8" />
-    <title>期末專案：銀髮守護者 (跌倒告警系統)</title>
+    <title>銀髮守護者 - 具備通訊紀錄功能</title>
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
-        body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; background-color: #f4f4f9; }
-        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
-        h1 { color: #2c3e50; font-size: 24px; text-align: center; }
-        .status-box { background: #e7f3ff; border: 1px solid #b3d7ff; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
-        .btn-group { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
-        button { padding: 10px 15px; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; }
-        .btn-sensor { background-color: #4CAF50; color: white; }
-        .btn-geo { background-color: #2196F3; color: white; }
-        #stateDisplay { background: #333; color: #fff; padding: 15px; border-radius: 5px; overflow-x: auto; font-size: 13px; }
-        .alert-active { background-color: #ff4d4d !important; color: white; animation: blink 1s infinite; padding: 20px; border-radius: 10px; display: none; margin-top: 20px; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
+        body { font-family: Arial, sans-serif; margin: 20px; background-color: #f0f2f5; transition: 0.5s; }
+        .container { max-width: 600px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }
+        .status-box { background: #e7f3ff; padding: 10px; border-radius: 5px; margin-bottom: 15px; font-weight: bold; color: #0d6efd; }
+        .alert-zone { background: #ff4d4d; color: white; padding: 20px; border-radius: 10px; display: none; margin-bottom: 20px; text-align: center; }
+        #historySection { margin-top: 30px; border-top: 2px solid #ddd; padding-top: 10px; }
+        .history-item { background: #f8f9fa; border: 1px solid #ddd; padding: 10px; margin-bottom: 5px; border-radius: 5px; display: flex; justify-content: space-between; align-items: center; }
+        .map-btn { background: #0d6efd; color: white; text-decoration: none; padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+        pre { background: #333; color: #fff; padding: 10px; border-radius: 5px; font-size: 12px; }
+        button { padding: 10px 15px; cursor: pointer; border: none; border-radius: 5px; background: #4CAF50; color: white; font-weight: bold; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <h1>👵 銀髮守護者</h1>
-    <div class="status-box" id="status">請先點擊下方按鈕授權感測器</div>
+    <div id="status" class="status-box">等待授權中...</div>
 
-    <div class="btn-group">
-        <button class="btn-sensor" onclick="requestSensorPermissionsManually()">啟動跌倒偵測 (iOS/Android)</button>
-        <button class="btn-geo" onclick="retryGeolocation()">重新讀取 GPS 定位</button>
+    <div style="text-align: center; margin-bottom: 20px;">
+        <button onclick="initSensors()">啟動監控系統</button>
+        <button style="background:#6c757d;" onclick="clearHistory()">清空紀錄</button>
     </div>
 
-    <div id="fallAlert" class="alert-active">
-        <strong>🚨 偵測到疑似跌倒！</strong><br>
-        緊急通訊訊息已發送至雲端。<br>
-        <span id="locationLink"></span>
-        <br><br>
-        <button onclick="resetAlert()" style="background: white; color: red;">我沒事，取消告警</button>
+    <div id="fallAlert" class="alert-zone">
+        <h2>🚨 偵測到跌倒！</h2>
+        <p>位置與時間已存入系統通訊紀錄</p>
+        <button onclick="resetAlert()" style="background: white; color: red;">我沒事 (重置)</button>
     </div>
 
-    <h3>裝置即時數據 (行動要素)：</h3>
-    <pre id="stateDisplay">等待資料中...</pre>
+    <h3>即時數值：</h3>
+    <pre id="stateDisplay">尚未取得數據</pre>
+
+    <div id="historySection">
+        <h3>📍 歷史定位紀錄 (通訊儲存內容)</h3>
+        <div id="historyList">尚無紀錄</div>
+    </div>
 </div>
 
 <script>
-// --- 1. 全域狀態變數 ---
-const deviceState = {
-    lat: null,
-    lon: null,
-    accel: { x: 0, y: 0, z: 0 }
-};
-let isAlerted = false; // 標記是否已觸發告警
+// --- 1. 資料與狀態 ---
+let deviceState = { lat: 0, lon: 0, x: 0, y: 0, z: 0 };
+let isAlerted = false;
+const THRESHOLD = 20; // 測試時可調低至 15
 
-// --- 2. 核心邏輯：跌倒偵測 (創新點) ---
+// --- 2. 核心：跌倒偵測與儲存 ---
 function detectFall(accel) {
     if (isAlerted) return;
+    const totalG = Math.sqrt(accel.x**2 + accel.y**2 + accel.z**2);
 
-    // 計算總加速度 (合力)
-    // 當手機撞擊地面時，總加速度會瞬間暴增
-    const totalAccel = Math.sqrt(accel.x**2 + accel.y**2 + accel.z**2);
-    
-    // 門檻值設定：25 m/s² 以上視為異常衝擊 (地球重力約 9.8)
-    if (totalAccel > 25) {
+    if (totalG > THRESHOLD) {
         isAlerted = true;
-        sendEmergencySignal(totalAccel);
+        handleEmergency(totalG);
     }
 }
 
-// --- 3. 通訊實作：發送告警 (通訊點) ---
-function sendEmergencySignal(impact) {
-    const statusDiv = document.getElementById("status");
-    const alertDiv = document.getElementById("fallAlert");
-    const linkSpan = document.getElementById("locationLink");
+function handleEmergency(impact) {
+    // 變更介面
+    document.getElementById("fallAlert").style.display = "block";
+    document.body.style.backgroundColor = "#ffebee";
 
-    statusDiv.textContent = "狀態：緊急狀況！";
-    alertDiv.style.display = "block";
-
-    // 產生 Google 地圖通訊連結
+    // 取得時間與座標
+    const now = new Date();
+    const timeStr = now.getHours() + ":" + now.getMinutes() + ":" + now.getSeconds();
     const mapUrl = `https://www.google.com/maps?q=${deviceState.lat},${deviceState.lon}`;
-    linkSpan.innerHTML = `<a href="${mapUrl}" target="_blank" style="color:white; text-decoration:underline;">點此查看長輩跌倒位置</a>`;
 
-    // 模擬通訊：在控制台輸出通訊封包
-    console.log("【通訊發送】目的地：緊急救援中心");
-    console.log(`【通訊內容】緯度:${deviceState.lat}, 經度:${deviceState.lon}, 衝擊力:${impact.toFixed(2)}`);
+    // --- 儲存內容 (通訊模擬) ---
+    const record = {
+        time: timeStr,
+        lat: deviceState.lat.toFixed(5),
+        lon: deviceState.lon.toFixed(5),
+        url: mapUrl
+    };
+
+    saveToStorage(record);
+    renderHistory();
+    alert("通訊警告：跌倒位置已存入資料庫！");
+}
+
+// --- 3. LocalStorage 儲存邏輯 ---
+function saveToStorage(newRecord) {
+    // 先讀取舊的資料，沒有就給空陣列
+    let history = JSON.parse(localStorage.getItem("fall_history") || "[]");
+    // 把新的塞進去
+    history.unshift(newRecord); // 加在最前面
+    // 存回瀏覽器
+    localStorage.setItem("fall_history", JSON.stringify(history));
+}
+
+function renderHistory() {
+    const list = document.getElementById("historyList");
+    let history = JSON.parse(localStorage.getItem("fall_history") || "[]");
     
-    // 瀏覽器跳出告警 (這也是一種簡單的通訊回報)
-    alert("緊急通知：偵測到跌倒！位置資訊已準備就緒。");
+    if (history.length === 0) {
+        list.innerHTML = "尚無紀錄";
+        return;
+    }
+
+    list.innerHTML = history.map(item => `
+        <div class="history-item">
+            <span><b>${item.time}</b> (力道過強)</span>
+            <a href="${item.url}" target="_blank" class="map-btn">打開定位</a>
+        </div>
+    `).join("");
+}
+
+// --- 4. 基礎感測器功能 ---
+function initSensors() {
+    // 請求位置
+    navigator.geolocation.watchPosition(pos => {
+        deviceState.lat = pos.coords.latitude;
+        deviceState.lon = pos.coords.longitude;
+        updateUI();
+    }, null, { enableHighAccuracy: true });
+
+    // 請求動態感測
+    if (typeof DeviceMotionEvent.requestPermission === 'function') {
+        DeviceMotionEvent.requestPermission().then(permissionState => {
+            if (permissionState === 'granted') window.addEventListener("devicemotion", onMotion);
+        });
+    } else {
+        window.addEventListener("devicemotion", onMotion);
+    }
+    document.getElementById("status").textContent = "監控中：系統正常運作";
+}
+
+function onMotion(e) {
+    const acc = e.accelerationIncludingGravity;
+    deviceState.x = acc.x || 0;
+    deviceState.y = acc.y || 0;
+    deviceState.z = acc.z || 0;
+    updateUI();
+    detectFall(deviceState);
+}
+
+function updateUI() {
+    document.getElementById("stateDisplay").textContent = JSON.stringify(deviceState, null, 2);
 }
 
 function resetAlert() {
     isAlerted = false;
     document.getElementById("fallAlert").style.display = "none";
-    document.getElementById("status").textContent = "狀態：監控中";
+    document.body.style.backgroundColor = "#f0f2f5";
 }
 
-// --- 4. 基礎感測器與定位功能 (參考老師架構) ---
-function updateUI() {
-    document.getElementById("stateDisplay").textContent = JSON.stringify(deviceState, null, 2);
+function clearHistory() {
+    localStorage.removeItem("fall_history");
+    renderHistory();
 }
 
-// 地理位置 (Geolocation API)
-function setupGeolocation() {
-    if ("geolocation" in navigator) {
-        navigator.geolocation.watchPosition(
-            (position) => {
-                deviceState.lat = position.coords.latitude;
-                deviceState.lon = position.coords.longitude;
-                updateUI();
-            },
-            (error) => console.error("定位錯誤:", error),
-            { enableHighAccuracy: true }
-        );
-    }
-}
-
-// 運動感測器 (Motion API)
-function startMotionListener() {
-    window.addEventListener("devicemotion", (event) => {
-        const acc = event.accelerationIncludingGravity || { x: 0, y: 0, z: 0 };
-        deviceState.accel.x = acc.x || 0;
-        deviceState.accel.y = acc.y || 0;
-        deviceState.accel.z = acc.z || 0;
-        
-        updateUI();
-        detectFall(deviceState.accel); // 每次更新數據都檢查是否跌倒
-    });
-}
-
-// 針對 iOS/現代瀏覽器的權限請求
-async function requestSensorPermissionsManually() {
-    if (typeof DeviceMotionEvent !== "undefined" && typeof DeviceMotionEvent.requestPermission === "function") {
-        try {
-            const state = await DeviceMotionEvent.requestPermission();
-            if (state === "granted") {
-                startMotionListener();
-                document.getElementById("status").textContent = "狀態：監控中";
-            }
-        } catch (e) {
-            alert("請確保使用 HTTPS 環境開啟網頁以獲得權限");
-        }
-    } else {
-        startMotionListener();
-        document.getElementById("status").textContent = "狀態：監控中";
-    }
-}
-
-function retryGeolocation() {
-    setupGeolocation();
-}
-
-// 網頁開啟自動執行
-window.onload = () => {
-    setupGeolocation();
-};
+// 初始載入歷史紀錄
+window.onload = renderHistory;
 </script>
-
 </body>
 </html>
